@@ -1,0 +1,42 @@
+# Ambientes virtuais
+venv/
+.venv/
+env/
+
+# Cache e arquivos compilados do Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Testes e ferramentas
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Saídas do treinamento
+out/
+checkpoints/
+*.pt
+*.pth
+
+# Logs e ferramentas de experimento
+*.log
+wandb/
+
+# Arquivos temporários do sistema e editores
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# Datasets brutos e caches locais
+data/.cache/
+data/raw/
+*.zip
