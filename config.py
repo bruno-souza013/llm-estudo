@@ -30,18 +30,14 @@ class TrainConfig:
     gradient_accumulation_steps: int = 2
 
     #quantidade total de iterações
-    #max_iters: int = 10000
-    max_iters: int = 200
+    max_iters: int = 10000
     #frequência de avaliação
-    #eval_interval: int = 500
-    eval_interval: int = 50
-    #eval_iters: int = 50
-    eval_iters: int = 10
+    eval_interval: int = 500
+    eval_iters: int = 50
 
     learning_rate: float = 6e-4
     min_lr: float = 6e-5  # piso do decaimento cosseno (~ learning_rate / 10)
-    #warmup_iters: int = 200
-    warmup_iters: int = 20
+    warmup_iters: int = 200
 
     # regularização
     weight_decay: float = 1e-1
