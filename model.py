@@ -80,7 +80,7 @@ class Block(nn.Module):
         return x + self.mlp(self.ln_2(x))
 
 
-class GPT(nn.Module):
+class LLM(nn.Module):
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
         self.config = config
