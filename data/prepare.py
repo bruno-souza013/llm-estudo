@@ -1,4 +1,8 @@
 import argparse
+import hashlib
+import re
+import unicodedata
+from html import unescape
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +14,21 @@ DATA_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = DATA_DIR / "wiki_pt"
 
 TAMANHO_LOTE = 256  # artigos tokenizados de cada vez
+
+
+def limpar_texto(texto: str) -> str:
+    texto = unescape(texto)
+    texto = unicodedata.normalize("NFC", texto)
+    texto = re.sub(r"https?://\S+|www\.\S+", " ", texto)
+    texto = "".join(
+        caractere
+        for caractere in texto
+        if caractere in "\n\t"
+        or not unicodedata.category(caractere).startswith("C")
+    )
+    texto = re.sub(r"[ \t]+", " ", texto)
+    texto = re.sub(r"\n{3,}", "\n\n", texto)
+    return texto.strip()
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,6 +73,7 @@ def main() -> None:
     tokens_val = 0
     artigos_val = 0
     artigos_lidos = 0
+    documentos_vistos: set[str] = set()
 
     with train_file.open("wb") as f_train, val_file.open("wb") as f_val:
 
@@ -72,9 +92,14 @@ def main() -> None:
 
         lote: list[str] = []
         for exemplo in tqdm(dataset, total=args.artigos):
-            texto = exemplo["text"].strip()
-            if not texto:
+            texto = limpar_texto(exemplo["text"])
+            if len(texto) < 500:
                 continue
+
+            hash_texto = hashlib.sha256(texto.encode("utf-8")).hexdigest()
+            if hash_texto in documentos_vistos:
+                continue
+            documentos_vistos.add(hash_texto)
 
             lote.append(texto)
             artigos_lidos += 1

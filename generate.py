@@ -30,7 +30,7 @@ def main() -> None:
 
     tokenizer = tiktoken.get_encoding("gpt2")
 
-    prompt = "A história do Brasil"
+    prompt = "Os jogadores brasileiros que participaram da Copa do Mundo"
     token_ids = tokenizer.encode(prompt)
     input_ids = torch.tensor(
         token_ids,
@@ -42,8 +42,8 @@ def main() -> None:
         generated_ids = model.generate(
             input_ids,
             max_new_tokens=200,
-            temperature=0.6,
-            top_k=50,
+            temperature=0.8,
+            top_k=100,
         )
 
     generated_text = tokenizer.decode(generated_ids[0].tolist())

@@ -1,5 +1,8 @@
+import csv
+import json
 import math
 import os
+import time
 from contextlib import nullcontext
 
 import numpy as np
@@ -141,6 +144,25 @@ def main() -> None:
 
     os.makedirs(train_config.out_dir, exist_ok=True)
     ckpt_path = os.path.join(train_config.out_dir, "ckpt.pt")
+    metrics_path = os.path.join(train_config.out_dir, "metrics.csv")
+    metrics_mode = "a" if getattr(train_config, "resume", False) else "w"
+    metrics_file = open(metrics_path, metrics_mode, newline="", encoding="utf-8")
+    metrics_writer = csv.DictWriter(
+        metrics_file,
+        fieldnames=[
+            "step",
+            "train_loss",
+            "val_loss",
+            "train_perplexity",
+            "val_perplexity",
+            "learning_rate",
+            "elapsed_seconds",
+            "gpu_memory_mb",
+        ],
+    )
+    if os.path.getsize(metrics_path) == 0:
+        metrics_writer.writeheader()
+    training_started_at = time.perf_counter()
 
     model = LLM(model_config).to(device)
     optimizer = build_optimizer(model, train_config)
@@ -167,6 +189,22 @@ def main() -> None:
     def evaluate_and_checkpoint(step: int) -> None:
         nonlocal best_val_loss
         losses = estimate_loss(model, train_config, model_config, device, context)
+        gpu_memory_mb = 0.0
+        if device.type == "cuda":
+            gpu_memory_mb = torch.cuda.max_memory_allocated(device) / (1024**2)
+        metrics_writer.writerow(
+            {
+                "step": step,
+                "train_loss": losses["train"],
+                "val_loss": losses["val"],
+                "train_perplexity": math.exp(losses["train"]),
+                "val_perplexity": math.exp(losses["val"]),
+                "learning_rate": optimizer.param_groups[0]["lr"],
+                "elapsed_seconds": time.perf_counter() - training_started_at,
+                "gpu_memory_mb": gpu_memory_mb,
+            }
+        )
+        metrics_file.flush()
         print(
             f"step {step}: "
             f"train loss {losses['train']:.4f}, "
@@ -219,6 +257,26 @@ def main() -> None:
 
     #avaliação final: garante que os últimos passos também possam virar checkpoint.
     evaluate_and_checkpoint(train_config.max_iters)
+    metrics_file.close()
+    with open(
+        os.path.join(train_config.out_dir, "run.json"),
+        "w",
+        encoding="utf-8",
+    ) as run_file:
+        json.dump(
+            {
+                "model_config": model_config.__dict__,
+                "train_config": train_config.__dict__,
+                "parameters": model.num_parameters(),
+                "device": str(device),
+                "precision": str(amp_dtype if use_amp else "float32"),
+                "duration_seconds": time.perf_counter() - training_started_at,
+                "best_val_loss": best_val_loss,
+                "best_val_perplexity": math.exp(best_val_loss),
+            },
+            run_file,
+            indent=2,
+        )
 
 
 if __name__ == "__main__":

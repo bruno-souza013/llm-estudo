@@ -52,6 +52,7 @@ llm-zero/
 ├── config.py              # configurações do modelo e do treinamento
 ├── model.py               # Transformer causal e geração
 ├── train.py               # carregamento dos dados e loop de treino
+├── benchmark.py           # relatório e gráfico das métricas
 ├── generate.py            # carregamento do checkpoint e geração
 ├── data/
 │   ├── prepare.py         # download, tokenização e criação dos binários
@@ -175,6 +176,31 @@ O arquivo de checkpoint contém:
 - passo salvo;
 - menor `val_loss` observada.
 
+O treino também salva automaticamente em `out/`:
+
+```text
+metrics.csv              # loss, perplexidade, learning rate e tempo
+run.json                 # configuração e resumo da execução
+```
+
+Para gerar o relatório e o gráfico depois do treinamento:
+
+```powershell
+python -m pip install matplotlib
+python benchmark.py --out-dir out
+```
+
+O comando cria:
+
+```text
+out/benchmark.json
+out/training_metrics.png
+```
+
+O gráfico mostra as curvas de `train loss` e `val loss`, além do learning
+rate. O relatório registra a melhor etapa, a perplexidade, o tempo total e o
+pico de memória da GPU observado durante as avaliações.
+
 ## Geração de texto
 
 Coloque o checkpoint em `out/ckpt.pt` e execute:
@@ -262,4 +288,3 @@ Fontes e ferramentas utilizadas:
 
 Consulte as licenças e os termos de uso de cada fonte antes de redistribuir o
 dataset ou publicar um modelo treinado com esses dados.
-
