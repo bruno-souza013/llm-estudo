@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from config import ModelConfig, TrainConfig
-from model import GPT
+from model import LLM
 
 
 def get_batch(
@@ -17,6 +17,7 @@ def get_batch(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     filename = "train.bin" if split == "train" else "val.bin"
     path = os.path.join(data_config.data_dir, filename)
+    #O memmap é recriado a cada chamada de propósito (evita vazamento de memória).
     data = np.memmap(path, dtype=np.uint16, mode="r")
 
     required_tokens = model_config.block_size + 1
@@ -53,10 +54,11 @@ def get_batch(
 
 @torch.no_grad()
 def estimate_loss(
-    model: GPT,
+    model: LLM,
     data_config: TrainConfig,
     model_config: ModelConfig,
     device: torch.device,
+    context,
 ) -> dict[str, float]:
     result: dict[str, float] = {}
     model.eval()
@@ -65,7 +67,9 @@ def estimate_loss(
         losses = torch.zeros(data_config.eval_iters)
         for iteration in range(data_config.eval_iters):
             x, y = get_batch(split, data_config, model_config, device)
-            _, loss = model(x, y)
+            #mesma precisão do treino, para as losses serem comparáveis.
+            with context:
+                _, loss = model(x, y)
             if loss is None:
                 raise RuntimeError("O modelo não retornou loss durante a avaliação")
             losses[iteration] = loss.item()
@@ -73,6 +77,37 @@ def estimate_loss(
 
     model.train()
     return result
+
+
+def get_lr(iteration: int, train_config: TrainConfig) -> float:
+    """Warmup linear seguido de decaimento cosseno até min_lr."""
+    max_lr = train_config.learning_rate
+    min_lr = getattr(train_config, "min_lr", max_lr / 10)
+    warmup_iters = getattr(train_config, "warmup_iters", 100)
+
+    if iteration < warmup_iters:
+        return max_lr * (iteration + 1) / (warmup_iters + 1)
+    if iteration >= train_config.max_iters:
+        return min_lr
+    progress = (iteration - warmup_iters) / max(1, train_config.max_iters - warmup_iters)
+    coeff = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return min_lr + coeff * (max_lr - min_lr)
+
+
+def build_optimizer(model: LLM, train_config: TrainConfig) -> torch.optim.AdamW:
+    """AdamW com weight decay só em matrizes (dim >= 2); biases e LayerNorm ficam sem."""
+    params = [p for p in model.parameters() if p.requires_grad]
+    decay_params = [p for p in params if p.dim() >= 2]
+    no_decay_params = [p for p in params if p.dim() < 2]
+    groups = [
+        {"params": decay_params, "weight_decay": train_config.weight_decay},
+        {"params": no_decay_params, "weight_decay": 0.0},
+    ]
+    return torch.optim.AdamW(
+        groups,
+        lr=train_config.learning_rate,
+        betas=(train_config.beta1, train_config.beta2),
+    )
 
 
 def main() -> None:
@@ -90,59 +125,100 @@ def main() -> None:
     if device.type == "cuda":
         torch.cuda.manual_seed(train_config.seed)
 
-    os.makedirs(train_config.out_dir, exist_ok=True)
-    model = GPT(model_config).to(device)
-    print(f"Parâmetros: {model.num_parameters():,}")
-    print(f"Dispositivo: {device}")
-
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=train_config.learning_rate,
-        betas=(train_config.beta1, train_config.beta2),
-        weight_decay=train_config.weight_decay,
-    )
+    # Precisão mista: bfloat16 se a GPU suportar (sem scaler); senão float16 + GradScaler.
+    # is_bf16_supported() também retorna True com bf16 *emulado* (T4), que é lento.
+    # Por isso exigimos compute capability >= 8.0 (Ampere ou mais novo).
+    use_amp = device.type == "cuda"
+    native_bf16 = use_amp and torch.cuda.get_device_capability(device)[0] >= 8
+    use_fp16 = use_amp and not native_bf16
+    amp_dtype = torch.float16 if use_fp16 else torch.bfloat16
     context = (
-        nullcontext()
-        if device.type == "cpu"
-        else torch.autocast(device_type=device.type, dtype=torch.float16)
+        torch.autocast(device_type=device.type, dtype=amp_dtype)
+        if use_amp
+        else nullcontext()
     )
+    scaler = torch.amp.GradScaler("cuda", enabled=use_fp16)
+
+    os.makedirs(train_config.out_dir, exist_ok=True)
+    ckpt_path = os.path.join(train_config.out_dir, "ckpt.pt")
+
+    model = LLM(model_config).to(device)
+    optimizer = build_optimizer(model, train_config)
+    print(f"Parâmetros: {model.num_parameters():,}")
+    print(f"Dispositivo: {device} | precisão: {amp_dtype if use_amp else 'float32'}")
+
+    start_iter = 0
     best_val_loss = math.inf
 
-    for iteration in range(train_config.max_iters):
-        if iteration % train_config.eval_interval == 0:
-            losses = estimate_loss(model, train_config, model_config, device)
-            print(
-                f"step {iteration}: "
-                f"train loss {losses['train']:.4f}, "
-                f"val loss {losses['val']:.4f}"
+    #retomada opcional: defina resume=True no TrainConfig.
+    if getattr(train_config, "resume", False) and os.path.exists(ckpt_path):
+        ckpt = torch.load(ckpt_path, map_location=device)
+        model.load_state_dict(ckpt["model"])
+        optimizer.load_state_dict(ckpt["optimizer"])
+        if use_fp16 and ckpt.get("scaler") is not None:
+            scaler.load_state_dict(ckpt["scaler"])
+        start_iter = ckpt["step"]
+        best_val_loss = ckpt["val_loss"]
+        print(f"Retomando do passo {start_iter} (val loss {best_val_loss:.4f})")
+
+    grad_clip = getattr(train_config, "grad_clip", 1.0)
+    accum_steps = train_config.gradient_accumulation_steps
+
+    def evaluate_and_checkpoint(step: int) -> None:
+        nonlocal best_val_loss
+        losses = estimate_loss(model, train_config, model_config, device, context)
+        print(
+            f"step {step}: "
+            f"train loss {losses['train']:.4f}, "
+            f"val loss {losses['val']:.4f}"
+        )
+        if losses["val"] < best_val_loss:
+            best_val_loss = losses["val"]
+            torch.save(
+                {
+                    "model": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "scaler": scaler.state_dict() if use_fp16 else None,
+                    "model_config": model_config.__dict__,
+                    "train_config": train_config.__dict__,
+                    "step": step,
+                    "val_loss": best_val_loss,
+                },
+                ckpt_path,
             )
-            if losses["val"] < best_val_loss:
-                best_val_loss = losses["val"]
-                torch.save(
-                    {
-                        "model": model.state_dict(),
-                        "model_config": model_config.__dict__,
-                        "train_config": train_config.__dict__,
-                        "step": iteration,
-                        "val_loss": best_val_loss,
-                    },
-                    os.path.join(train_config.out_dir, "ckpt.pt"),
-                )
+
+    model.train()
+    for iteration in range(start_iter, train_config.max_iters):
+        lr = get_lr(iteration, train_config)
+        for group in optimizer.param_groups:
+            group["lr"] = lr
+
+        if iteration % train_config.eval_interval == 0:
+            evaluate_and_checkpoint(iteration)
 
         optimizer.zero_grad(set_to_none=True)
-        for _ in range(train_config.gradient_accumulation_steps):
+        loss_accum = 0.0
+        for _ in range(accum_steps):
             x, y = get_batch("train", train_config, model_config, device)
             with context:
                 _, loss = model(x, y)
             if loss is None:
                 raise RuntimeError("O modelo não retornou loss durante o treino")
-            (loss / train_config.gradient_accumulation_steps).backward()
+            loss = loss / accum_steps
+            loss_accum += loss.item()
+            scaler.scale(loss).backward()
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optimizer.step()
+        #unscale_ antes do clip: o clip precisa ver os gradientes reais.
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        scaler.step(optimizer)
+        scaler.update()
 
         if iteration % 10 == 0:
-            print(f"step {iteration}: batch loss {loss.item():.4f}")
+            print(f"step {iteration}: batch loss {loss_accum:.4f} | lr {lr:.2e}")
+
+    #avaliação final: garante que os últimos passos também possam virar checkpoint.
+    evaluate_and_checkpoint(train_config.max_iters)
 
 
 if __name__ == "__main__":
