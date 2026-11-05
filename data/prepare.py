@@ -9,12 +9,13 @@ from tqdm import tqdm
 DATA_DIR = Path(__file__).parent
 INPUT_FILE = DATA_DIR / "input.txt"
 OUTPUT_DIR = DATA_DIR / "wiki_pt"
+QUANTIDADE_ARTIGOS = 2_000
 
 #cria data/wiki_pt caso ela ainda não exista
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-#baixa 300 artigos somente se input.txt ainda não existir
+#baixa 2.000 artigos somente se input.txt ainda não existir
 if not INPUT_FILE.exists():
     dataset = load_dataset(
         "wikimedia/wikipedia",
@@ -23,11 +24,10 @@ if not INPUT_FILE.exists():
         streaming=True,
     )
 
-    quantidade_maxima = 300
     artigos_salvos = 0
 
     with INPUT_FILE.open("w", encoding="utf-8") as arquivo:
-        for exemplo in tqdm(dataset, total=quantidade_maxima):
+        for exemplo in tqdm(dataset, total=QUANTIDADE_ARTIGOS):
             texto = exemplo["text"].strip()
 
             if not texto:
@@ -38,7 +38,7 @@ if not INPUT_FILE.exists():
 
             artigos_salvos += 1
 
-            if artigos_salvos >= quantidade_maxima:
+            if artigos_salvos >= QUANTIDADE_ARTIGOS:
                 break
 
     print(f"{artigos_salvos} artigos salvos em {INPUT_FILE}")

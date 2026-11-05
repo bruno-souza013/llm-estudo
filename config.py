@@ -32,11 +32,11 @@ class TrainConfig:
     gradient_accumulation_steps: int = 1
 
     #quantidade total de iterações
-    max_iters: int = 1000
+    max_iters: int = 10000
 
     #frequência de avaliação
-    eval_interval: int = 100
-    eval_iters: int = 20
+    eval_interval: int = 500
+    eval_iters: int = 50
 
     #taxa de aprendizado
     learning_rate: float = 3e-4
