@@ -30,7 +30,7 @@ def main() -> None:
 
     tokenizer = tiktoken.get_encoding("gpt2")
 
-    prompt = "Os jogadores brasileiros que participaram da Copa do Mundo"
+    prompt = "A"
     token_ids = tokenizer.encode(prompt)
     input_ids = torch.tensor(
         token_ids,

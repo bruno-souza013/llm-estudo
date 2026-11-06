@@ -1,0 +1,47 @@
+{
+  "evaluations": 21,
+  "best_step": 10000,
+  "best_val_loss": 3.113034963607788,
+  "best_val_perplexity": 22.489194819260092,
+  "final_train_loss": 3.1901421546936035,
+  "final_val_loss": 3.113034963607788,
+  "final_val_perplexity": 22.489194819260092,
+  "peak_gpu_memory_mb": 1218.8857421875,
+  "duration_seconds": 1406.6500345230002,
+  "run": {
+    "model_config": {
+      "vocab_size": 50257,
+      "block_size": 256,
+      "n_layer": 6,
+      "n_head": 6,
+      "n_embd": 384,
+      "dropout": 0.1,
+      "bias": true
+    },
+    "train_config": {
+      "data_dir": "data/wiki_pt",
+      "out_dir": "out-wiki-100k-v1",
+      "device": "cuda",
+      "batch_size": 4,
+      "gradient_accumulation_steps": 4,
+      "max_iters": 10000,
+      "eval_interval": 500,
+      "eval_iters": 50,
+      "learning_rate": 0.0003,
+      "min_lr": 6e-05,
+      "warmup_iters": 200,
+      "weight_decay": 0.1,
+      "beta1": 0.9,
+      "beta2": 0.95,
+      "grad_clip": 1.0,
+      "resume": false,
+      "seed": 1337
+    },
+    "parameters": 30044544,
+    "device": "cuda",
+    "precision": "torch.float16",
+    "duration_seconds": 1407.297343971,
+    "best_val_loss": 3.113034963607788,
+    "best_val_perplexity": 22.489194819260092
+  }
+}

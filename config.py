@@ -20,13 +20,13 @@ class ModelConfig:
 @dataclass
 class TrainConfig:
     data_dir: str = "data/wiki_pt"
-    out_dir: str = "out-wiki-100k-v1"
+    out_dir: str = "out-wiki-100k-v2"
 
     device: str = "cuda"
-    batch_size: int = 4
+    batch_size: int = 8
     gradient_accumulation_steps: int = 4
 
-    max_iters: int = 10_000
+    max_iters: int = 30_000
     eval_interval: int = 500
     eval_iters: int = 50
 
